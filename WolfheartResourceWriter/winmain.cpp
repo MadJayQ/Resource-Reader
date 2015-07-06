@@ -4,8 +4,6 @@
 #include <Windows.h>
 #include <algorithm>
 #include <png.h>
-#include <png++\png.hpp>
-
 
 
 #pragma comment (lib, "libpng.lib")
@@ -26,6 +24,19 @@ struct IMAGE
 	int bbp;
 	unsigned int datalength;
 };
+
+
+//Global Variables
+png_structp pngPtr = nullptr;
+png_infop infoPtr = nullptr;
+png_bytep* rowsPtrs = nullptr;
+unsigned char* data = nullptr;
+
+
+void WritePNG();
+void ReadPNG();
+void __cdecl ReadData(png_structp pngPtr, png_bytep data, png_size_t length);
+int ValidatePNG(fstream&);
 
 int __cdecl main()
 {
@@ -62,4 +73,39 @@ int __cdecl main()
 
 	delete[] buf;
 
+	ReadPNG();
+	WritePNG();
+	
+
 }
+
+void ReadPNG()
+{
+	fstream fh;
+	fh.open("../paddle.png", ios::in | ios::binary);
+	if (fh.is_open())
+	{
+		if (ValidatePNG(fh))
+		{
+			MessageBox(nullptr, "Not a PNG", "", MB_ICONERROR);
+		}
+		pngPtr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+
+	}
+}
+
+void WritePNG()
+{
+
+}
+
+int ValidatePNG(fstream& source)
+{
+	png_byte sigbyte[8];
+	source.read((char*)&sigbyte, 8);
+
+	if (!source.good()) return 1;
+
+	return png_sig_cmp(sigbyte, 0, 8);
+}
+

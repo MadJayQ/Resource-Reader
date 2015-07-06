@@ -9,9 +9,10 @@
 #include <stdlib.h>
 #include <memory>
 #include <algorithm>
+#include <png.h>
 
 
-
+#pragma comment (lib, "libpng")
 #pragma comment (lib, "windowscodecs")
 #pragma comment (lib, "d2d1")
 
@@ -52,6 +53,7 @@ ID2D1Factory* m_pFactory = nullptr;
 ID2D1HwndRenderTarget* m_pRenderTarget = nullptr;
 IWICBitmap* m_pWICBitmap = nullptr;
 ID2D1Bitmap* m_pBitmap = nullptr;
+ID2D1Bitmap* m_pPaddle = nullptr;
 
 HWND hwnd;
 
@@ -65,6 +67,8 @@ bool InitDirect2D();
 void Update();
 void Render();
 void LoadResources();
+int ValidatePNG(std::fstream&);
+void __cdecl ReadData(png_structp pngPtr, png_bytep data, png_size_t length);
 
 int __stdcall wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow)
 {
@@ -125,6 +129,13 @@ int __stdcall wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstanc
 
 }
 
+void __cdecl ReadData(png_structp pngPtr, png_bytep data, png_size_t length)
+{
+	png_voidp a = png_get_io_ptr(pngPtr);
+
+	((std::fstream*)a)->read((char*)data, length);
+}
+
 void LoadResources()
 {
 
@@ -159,6 +170,86 @@ void LoadResources()
 			MessageBox(nullptr, cBuffer, "", MB_ICONINFORMATION);
 		}
 	}
+
+	fh.open("../paddle.png", std::ios::in | std::ios::binary);
+	if (fh.is_open())
+	{
+		if (ValidatePNG(fh))
+		{
+			MessageBox(nullptr, "NOT A PNG", "", 0);
+		}
+	}
+	png_structp pngPtr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+	if (!pngPtr)
+	{
+		MessageBox(nullptr, "ERROR: Couldn't initialize png read struct", "", 0);
+		return;
+	}
+	png_infop infoPtr = png_create_info_struct(pngPtr);
+	if (!infoPtr) {
+		MessageBox(nullptr, "ERROR: Couldn't initialize png info struct", "", 0);
+		png_destroy_read_struct(&pngPtr, (png_infopp)0, (png_infopp)0);
+		return;
+	}
+
+	png_bytep* rowsPtrs = nullptr;
+	unsigned char* data = nullptr;
+	
+	if (setjmp(png_jmpbuf(pngPtr)))
+	{
+		png_destroy_read_struct(&pngPtr, &infoPtr, (png_infopp)0);
+		if (rowsPtrs != nullptr) delete[] rowsPtrs;
+		if (data != nullptr) delete[] data;
+
+		MessageBox(nullptr, "ERROR: An error occured while reading the PNG file", "", 0);
+
+		return;
+	}
+	
+	png_set_read_fn(pngPtr, (png_voidp)&fh, ReadData);
+
+	png_set_sig_bytes(pngPtr, 8);
+	png_read_info(pngPtr, infoPtr);
+
+	png_uint_32 width = png_get_image_width(pngPtr, infoPtr);
+	png_uint_32 height = png_get_image_height(pngPtr, infoPtr);
+
+	png_uint_32 bitdepth = png_get_bit_depth(pngPtr, infoPtr);
+	png_uint_32 channels = png_get_channels(pngPtr, infoPtr);
+	png_uint_32 color_type = png_get_color_type(pngPtr, infoPtr);
+
+	rowsPtrs = new png_bytep[height];
+	data = new unsigned char[width * height * bitdepth * channels / 8];
+
+	const unsigned int stride = width * bitdepth * channels / 8; 
+
+	for (size_t i = 0; i < height; i++)
+	{
+		png_uint_32 q = (height - i - 1) * stride;
+		rowsPtrs[i] = (png_bytep)data + q;
+	}
+
+	png_read_image(pngPtr, rowsPtrs);
+
+	delete[](png_bytep)rowsPtrs;
+	png_destroy_read_struct(&pngPtr, &infoPtr, (png_infopp)0);
+
+	hr = m_pWICFactory->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppBGR, stride, width * height * bitdepth * channels / 8, data, &m_pWICBitmap);
+	if (FAILED(hr))
+	{
+		sprintf_s(cBuffer, "Memory Error Code: 0x%x", hr);
+		MessageBox(nullptr, cBuffer, "ERROR", MB_ICONERROR);
+	}
+
+	hr = m_pRenderTarget->CreateBitmapFromWicBitmap(m_pWICBitmap, &m_pPaddle);
+	if (FAILED(hr))
+	{
+		sprintf_s(cBuffer, "Error Code: 0x%x", hr);
+		MessageBox(nullptr, cBuffer, "ERROR", MB_ICONERROR);
+	}
+	
+
+	delete[] data;
 }
 
 bool InitDirect2D()
@@ -182,6 +273,16 @@ bool InitDirect2D()
 	return true;
 }
 
+int ValidatePNG(std::fstream& source)
+{
+	png_byte pngsig[8];
+	source.read((char*)&pngsig, 8);
+
+	if (!source.good()) return 1;
+
+	return png_sig_cmp(pngsig, 0, 8);
+}
+
 void Tick()
 {
 	Update();
@@ -190,56 +291,14 @@ void Tick()
 
 void Update()
 {
-	/*
-	HRESULT hr = S_OK;
 
-	unsigned char *buffer = new unsigned char[800 * 4 * 600];
-
-	int width = 800;
-	int height = 600;
-
-	int c = 0;
-	for (int i = 0; i < width; i++)
-	{
-		for (int j = 0; j < height; j++)
-		{
-			buffer[c + 0] = (unsigned char)rand();
-			buffer[c + 1] = (unsigned char)rand();
-			buffer[c + 2] = (unsigned char)rand();
-			buffer[c + 3] = (unsigned char)rand();
-
-			c += 4;
-		}
-	}
-
-	//hr = m_pWICFactory->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppPBGRA, 4 * width, 800 * 4 * 600, buffer, &m_pWICBitmap);
-
-	if (FAILED(hr))
-	{
-		char cBuffer[64];
-		sprintf_s(cBuffer, "0x%x", hr);
-		MessageBox(nullptr, cBuffer, "", MB_ICONINFORMATION);
-	}
-	
-
-	hr = m_pRenderTarget->CreateBitmapFromWicBitmap(m_pWICBitmap, &m_pBitmap);
-	if (FAILED(hr))
-	{
-		char cBuffer[64];
-		sprintf_s(cBuffer, "0x%x", hr);
-		MessageBox(nullptr, cBuffer, "", MB_ICONINFORMATION);
-	}
-	
-
-
-	delete[] buffer;
-	*/
 }
 void Render()
 {
 	m_pRenderTarget->BeginDraw();
 	m_pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 	m_pRenderTarget->DrawBitmap(m_pBitmap, D2D1::RectF(0, 0, 800, 600));
+	m_pRenderTarget->DrawBitmap(m_pPaddle, D2D1::RectF(0, 0, 32, 192));
 	m_pRenderTarget->EndDraw();
 }
 
